@@ -23,9 +23,7 @@ $ cargo test
 │   │   └── ...
 │   ├── lexical_analysis.rs #词法分析
 │   └── lib.rs
-├── static
-│   └── keep_str.jsonc #保留字存放位置
-└── target
-    └── ...
+└── static
+    └── keep_str.jsonc #保留字存放位置
 ```
 
