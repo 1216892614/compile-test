@@ -20,6 +20,8 @@
     "}": "EndScope",
     "(": "LeftBrackets",
     ")": "RightBrackets",
+    ";": "FuncEnd",
+    ",": "Apart",
     "||": "Or",
     "&&": "And",
     "+=": "AddAs",

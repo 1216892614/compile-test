@@ -5,9 +5,9 @@ mod keep_for_use {
 
     #[derive(Debug)]
     pub(super) struct Keep {
-        KeepWords: HashMap<String, String>,
-        KeepSymbol: HashMap<String, String>,
-        KeepComplexSymbol: HashMap<String, String>,
+        pub(super) keep_words: HashMap<String, String>,
+        pub(super) keep_symbol: HashMap<String, String>,
+        pub(super) keep_complex_symbol: HashMap<String, String>,
     }
 
     pub(super) fn keepwords_deserialization(jsonc: &str) -> LexicalAnalysisResult<Keep> {
@@ -17,9 +17,9 @@ mod keep_for_use {
         };
 
         let mut keep = Keep {
-            KeepWords: HashMap::new(),
-            KeepSymbol: HashMap::new(),
-            KeepComplexSymbol: HashMap::new(),
+            keep_words: HashMap::new(),
+            keep_symbol: HashMap::new(),
+            keep_complex_symbol: HashMap::new(),
         };
 
         match root_json {
@@ -37,17 +37,17 @@ mod keep_for_use {
         object: Map<String, Value>,
     ) -> LexicalAnalysisResult<()> {
         for (source, symbol) in object {
-            if super::is_made_entirely_alphanumeric(&source) {
-                keep.KeepWords
+            if super::is_made_entirely_alphanumeric_or_empty(&source) {
+                keep.keep_words
                     .insert(source, safe_get_str_from_value(symbol)?);
-            } else if source.len() > 1 && !super::is_made_entirely_alphanumeric(&source) {
-                keep.KeepComplexSymbol
+            } else if source.len() > 1 && !super::is_made_entirely_alphanumeric_or_empty(&source) {
+                keep.keep_complex_symbol
                     .insert(source, safe_get_str_from_value(symbol)?);
-            } else if source.len() == 1 && !super::is_made_entirely_alphanumeric(&source) {
-                keep.KeepSymbol
+            } else if source.len() == 1 && !super::is_made_entirely_alphanumeric_or_empty(&source) {
+                keep.keep_symbol
                     .insert(source, safe_get_str_from_value(symbol)?);
             } else {
-                return Err(LexicalAnalysisErr::unsupported_keywords(source));
+                return Err(LexicalAnalysisErr::UnsupportedKeywords(source));
             }
         }
 
@@ -63,69 +63,198 @@ mod keep_for_use {
     }
 }
 
-fn is_made_entirely_alphanumeric(str: &str) -> bool {
+fn is_made_entirely_alphanumeric_or_empty(str: &str) -> bool {
     str.chars()
-        .any(|i| matches!(i,'a'..='z' | 'A'..='Z' | '_' | '0'..='9'))
+        .all(|i| matches!(i,'a'..='z' | 'A'..='Z' | '_' | '0'..='9'))
 }
 
-pub enum KeyType<'a> {
-    KeepWord(&'a str),
-    Identifier(&'a str),
+#[derive(Debug)]
+pub enum KeyType {
+    KeepWord(String),
+    Identifier(String),
     Value(i32),
 }
 
-fn code_split(code: String) -> Result<Vec<String>, err::LexicalAnalysisErr> {
-    let mut result = Vec::new();
-    let mut buf = String::new();
+use code_split::CodeSpliting;
+use std::collections::HashMap;
+
+fn code_split(
+    code: String,
+    complex_key_symbol: HashMap<String, String>,
+) -> Result<Vec<String>, err::LexicalAnalysisErr> {
+    let mut code_split = CodeSpliting::new(complex_key_symbol);
     for c in code.chars() {
-        code_split::distinguish_between_vocabulary_boundaries(&c, &mut buf, &mut result);
+        match c {
+            'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => code_split.insert_alphanumeric_to_buf(c),
+            ' ' | '\n' | '\t' => code_split.insert_not_empty_buf_to_result(),
+            _ => code_split.insert_symbol_to_buf(c),
+        }
+    }
+    //TODO
+    println!("result: {:?}", code_split.result);
+    Ok(code_split.result)
+}
+
+mod code_split {
+    use std::collections::HashMap;
+
+    use crate::is_made_entirely_alphanumeric_or_empty;
+
+    pub(super) struct CodeSpliting {
+        pub(super) result: Vec<String>,
+        buf: String,
+        keep_complex_symbol: HashMap<String, String>,
+    }
+
+    impl CodeSpliting {
+        pub(super) fn new(keep_complex_symbol: HashMap<String, String>) -> Self {
+            CodeSpliting {
+                result: Vec::new(),
+                buf: String::new(),
+                keep_complex_symbol,
+            }
+        }
+
+        pub(super) fn insert_not_empty_buf_to_result(&mut self) {
+            if is_made_entirely_alphanumeric_or_empty(&self.buf) && !self.buf.is_empty() {
+                self.move_alphanumeric_buf_to_result();
+            } else {
+                self.move_not_empty_symbol_buf_to_result();
+            };
+        }
+
+        pub(super) fn insert_alphanumeric_to_buf(&mut self, c: char) {
+            match &mut self.buf {
+                buf if is_made_entirely_alphanumeric_or_empty(&buf) => buf.push(c),
+                _ => {
+                    self.move_not_empty_symbol_buf_to_result();
+                    self.buf.push(c);
+                }
+            };
+        }
+
+        pub(super) fn insert_symbol_to_buf(&mut self, c: char) {
+            match &mut self.buf {
+                buf if buf.len() == 0 => self.buf.push(c),
+                buf if is_made_entirely_alphanumeric_or_empty(&buf) => {
+                    self.move_alphanumeric_buf_to_result();
+                    self.buf.push(c);
+                }
+                _ => self.buf.push(c),
+            };
+        }
+
+        fn move_alphanumeric_buf_to_result(&mut self) {
+            self.result.push(self.buf.clone());
+            self.buf.clear();
+        }
+
+        fn move_not_empty_symbol_buf_to_result(&mut self) {
+            match self.buf.len() {
+                0 => return,
+                1 => self.result.push(self.buf.clone()),
+                _ => self.matching_symbol_arr_and_move(),
+            };
+            self.buf.clear();
+        }
+
+        fn matching_symbol_arr_and_move(&mut self) {
+            for i in (1..self.buf.len()).rev() {
+                let mut close_2 = String::new();
+
+                match self.buf.chars().nth(i - 1) {
+                    Some(c) => close_2.push(c),
+                    None => continue,
+                }
+                match self.buf.chars().nth(i) {
+                    Some(c) => close_2.push(c),
+                    None => continue,
+                }
+
+                self.insert_symbol(close_2);
+            }
+            self.clear_buf_to_result();
+        }
+
+        fn insert_symbol(&mut self, close_2: String) {
+            match self.keep_complex_symbol.get(&close_2) {
+                Some(_) => {
+                    self.result.push(close_2);
+                    self.buf = self.buf.chars().rev().collect();
+                    self.buf.pop();
+                    self.buf.pop();
+                    self.buf = self.buf.chars().rev().collect();
+                }
+                None => {
+                    self.buf = self.buf.chars().rev().collect();
+                    self.result.push(self.buf.pop().unwrap().to_string());
+                    self.buf = self.buf.chars().rev().collect();
+                }
+            }
+        }
+
+        fn clear_buf_to_result(&mut self) {
+            for i in self.buf.chars() {
+                self.result.push(i.to_string());
+            }
+            self.buf.clear();
+        }
+    }
+}
+
+fn words_match(
+    word_vec: Vec<String>,
+    keep_words: keep_for_use::Keep,
+) -> err::LexicalAnalysisResult<Vec<KeyType>> {
+    let mut result: Vec<KeyType> = Vec::new();
+    for word in word_vec {
+        match word {
+            word if is_made_entirely_alphanumeric_or_empty(&word) => {
+                match keep_words.keep_words.get(&word) {
+                    Some(word) => result.push(KeyType::KeepWord(word.to_string())),
+                    None => result.push(match word.parse::<i32>() {
+                        Ok(num) => KeyType::Value(num),
+                        Err(_) => KeyType::Identifier(word),
+                    }),
+                }
+            }
+            word if word.len() > 1 => match keep_words.keep_complex_symbol.get(&word) {
+                Some(word) => result.push(KeyType::KeepWord(word.to_string())),
+                None => {
+                    return Err(err::LexicalAnalysisErr::UndefinedKeywords(format!(
+                        "<ComplexSymbol: {}>",
+                        word
+                    )))
+                }
+            },
+            _ => match keep_words.keep_symbol.get(&word) {
+                Some(word) => result.push(KeyType::KeepWord(word.to_string())),
+                None => {
+                    return Err(err::LexicalAnalysisErr::UndefinedKeywords(format!(
+                        "<SingleSymbol: {}>",
+                        word
+                    )))
+                }
+            },
+        };
     }
     Ok(result)
 }
 
-mod code_split {
-    use crate::is_made_entirely_alphanumeric;
-
-    pub(super) fn distinguish_between_vocabulary_boundaries(
-        char_for_now: &char,
-        buf: &mut String,
-        result: &mut Vec<String>,
-    ) {
-        match char_for_now {
-            ' ' | '\n' | '\t' => push_buf_not_empty_to_result(buf, result),
-            'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => {
-                push_letter_num_to_result(char_for_now, buf, result)
-            }
-            _ => todo!(),
-        }
-    }
-
-    fn push_buf_not_empty_to_result(buf: &mut String, result: &mut Vec<String>) {
-        if buf.len() != 0 {
-            result.push(buf.to_string())
-        }
-        buf.clear();
-    }
-
-    fn push_letter_num_to_result(char_for_now: &char, buf: &mut String, result: &mut Vec<String>) {
-        match buf {
-            buf if is_made_entirely_alphanumeric(buf) || buf.len() == 0 => buf.push(*char_for_now),
-            _ => todo!(),
-        }
-    }
-}
-
-fn words_match<'a>(word_vec: Vec<String>) -> err::LexicalAnalysisResult<KeyType<'a>> {
-    todo!()
-}
-
-pub fn lexical_analysis(code: &str) -> err::LexicalAnalysisResult<KeyType> {
-    Ok(words_match(code_split(code.to_string())?)?)
+pub fn lexical_analysis(
+    code: &str,
+    key_words_json: &str,
+) -> err::LexicalAnalysisResult<Vec<KeyType>> {
+    let key_words = keep_for_use::keepwords_deserialization(key_words_json)?;
+    Ok(words_match(
+        code_split(code.to_string(), key_words.keep_complex_symbol.clone())?,
+        key_words,
+    )?)
 }
 
 mod err {
     use serde_json;
-    use std::{error::Error, fmt::Display};
+    use std::fmt::Display;
 
     pub type LexicalAnalysisResult<T> = Result<T, LexicalAnalysisErr>;
 
@@ -134,7 +263,8 @@ mod err {
         FailToSerializationKeyWordsJson(serde_json::Error),
         FailToReadKeyWordsJsonTree,
         SymbolOfKeywordsIsNotString,
-        unsupported_keywords(String),
+        UnsupportedKeywords(String),
+        UndefinedKeywords(String),
     }
 
     impl Display for LexicalAnalysisErr {
@@ -149,56 +279,103 @@ mod err {
                     f,
                     "Be sure your keywords JSON same as: {{ \"source str\": \"symbol str\" }}."
                 ),
-                LexicalAnalysisErr::unsupported_keywords(s) => {
-                    write!(f, "{:?} is not a supported word for this language.", s)
+                LexicalAnalysisErr::UnsupportedKeywords(s) => {
+                    write!(
+                        f,
+                        "{:?} is not a supported word for this lexical_analysis.",
+                        s
+                    )
+                }
+                LexicalAnalysisErr::UndefinedKeywords(s) => {
+                    write!(f, "{:?} is not a defined keep word for this language.", s)
                 }
             }
         }
     }
-
-    impl Error for LexicalAnalysisErr {}
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{lexical_analysis, KeyType};
+    use crate::{
+        code_split, err, keep_for_use::keepwords_deserialization, lexical_analysis, KeyType,
+    };
+    use std::io::Read;
 
     #[test]
-    fn it_works() {
-        let test_set = vec![
-            " int main()
-            {
-                return 1;
-            }",
-            " int main()
-            {
-                int a=10,b=20,max;
-                if (a>=b)
-                     max=a;
-               else max=b;
-                return 1;
-            }",
-            " int while if else return
-            =
-            + - * /
-            < <= > >= == !=
-            # @",
-            " @
-            #",
-        ];
-        let mut word_map: Vec<KeyType> = Vec::new();
-        for i in test_set {
-            word_map.push(lexical_analysis(i).unwrap());
-        }
+    fn it_works_0() {
+        println!(
+            "{:?}",
+            run_lexical_analysis(
+                " int main()
+                {
+                    return 1;
+                }"
+            )
+            .unwrap()
+        );
     }
 
-    use crate::keep_for_use::{keepwords_deserialization, Keep};
-    use std::io::Read;
     #[test]
-    fn json_to_keywords() {
+    fn it_works_1() {
+        println!(
+            "{:?}",
+            run_lexical_analysis(
+                " int main()
+                {
+                    int a=10,b=20,max;
+                    if (a>=b)
+                         max=a;
+                    else max=b;
+                    return 1;
+                }"
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn it_works_2() {
+        println!(
+            "{:?}",
+            run_lexical_analysis(
+                " int while if else return
+                =
+                + - * /
+                < <= > >= == !=
+                # @"
+            )
+        );
+    }
+
+    fn run_lexical_analysis(test_set: &str) -> err::LexicalAnalysisResult<Vec<KeyType>> {
         let mut json = std::fs::File::open("static/keep_str.jsonc").unwrap();
         let mut txt = String::new();
         json.read_to_string(&mut txt).unwrap();
-        println!("{:?}", keepwords_deserialization(&txt))
+        lexical_analysis(test_set, &txt)
+    }
+
+    #[test]
+    fn code_split_works() {
+        let code = " int main()
+        {
+            int a=10,b=20,max;
+            if (a>=b)
+            max=a;
+            else max=>b;
+            return 1;
+            @
+        }";
+
+        let mut json = std::fs::File::open("static/keep_str.jsonc").unwrap();
+        let mut txt = String::new();
+        json.read_to_string(&mut txt).unwrap();
+
+        println!(
+            "{:?}",
+            code_split(
+                code.to_string(),
+                keepwords_deserialization(&txt).unwrap().keep_complex_symbol
+            )
+        );
     }
 }
