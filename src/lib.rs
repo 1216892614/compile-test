@@ -90,8 +90,6 @@ fn code_split(
             _ => code_split.insert_symbol_to_buf(c),
         }
     }
-    //TODO
-    println!("result: {:?}", code_split.result);
     Ok(code_split.result)
 }
 
