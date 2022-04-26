@@ -20,7 +20,6 @@ fn code_split(
     complex_key_symbol: HashMap<String, String>,
 ) -> Result<Vec<String>, err::LexicalAnalysisErr> {
     let mut code_split = CodeSpliting::new(complex_key_symbol);
-    let mut line_number: usize = 0;
     for c in code.chars() {
         match c {
             'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => code_split.insert_alphanumeric_to_buf(c),
