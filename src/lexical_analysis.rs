@@ -20,10 +20,11 @@ fn code_split(
     complex_key_symbol: HashMap<String, String>,
 ) -> Result<Vec<String>, err::LexicalAnalysisErr> {
     let mut code_split = CodeSpliting::new(complex_key_symbol);
+    let mut line_number: usize = 0;
     for c in code.chars() {
         match c {
             'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => code_split.insert_alphanumeric_to_buf(c),
-            ' ' | '\n' | '\t' => code_split.insert_not_empty_buf_to_result(),
+            ' ' | '\t' => code_split.insert_not_empty_buf_to_result(),
             _ => code_split.insert_symbol_to_buf(c),
         }
     }
@@ -36,8 +37,11 @@ fn words_match(
     keep_words: keep_for_use::Keep,
 ) -> err::LexicalAnalysisResult<Vec<KeyType>> {
     let mut result: Vec<KeyType> = Vec::new();
+    let mut line_number: usize = 1;
     for word in word_vec {
         match word {
+            word if word == '\n'.to_string() => line_number += 1,
+
             word if is_made_entirely_alphanumeric_or_empty(&word) => {
                 match keep_words.keep_words.get(&word) {
                     Some(word) => result.push(KeyType::KeepWord(word.to_string())),
@@ -47,22 +51,24 @@ fn words_match(
                     }),
                 }
             }
+
             word if word.len() > 1 => match keep_words.keep_complex_symbol.get(&word) {
                 Some(word) => result.push(KeyType::KeepWord(word.to_string())),
                 None => {
-                    return Err(err::LexicalAnalysisErr::UndefinedKeywords(format!(
-                        "<ComplexSymbol: {}>",
-                        word
-                    )))
+                    return Err(err::LexicalAnalysisErr::UndefinedKeywords(
+                        format!("<ComplexSymbol: {}>", word),
+                        line_number,
+                    ))
                 }
             },
+
             _ => match keep_words.keep_symbol.get(&word) {
                 Some(word) => result.push(KeyType::KeepWord(word.to_string())),
                 None => {
-                    return Err(err::LexicalAnalysisErr::UndefinedKeywords(format!(
-                        "<SingleSymbol: {}>",
-                        word
-                    )))
+                    return Err(err::LexicalAnalysisErr::UndefinedKeywords(
+                        format!("<SingleSymbol: {}>", word),
+                        line_number,
+                    ))
                 }
             },
         };

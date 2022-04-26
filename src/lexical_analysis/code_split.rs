@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use super::is_made_entirely_alphanumeric_or_empty;
 
 pub(super) struct CodeSpliting {

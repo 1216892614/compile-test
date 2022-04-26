@@ -9,7 +9,7 @@ pub enum LexicalAnalysisErr {
     FailToReadKeyWordsJsonTree,
     SymbolOfKeywordsIsNotString,
     UnsupportedKeywords(String),
-    UndefinedKeywords(String),
+    UndefinedKeywords(String, usize),
 }
 
 impl Display for LexicalAnalysisErr {
@@ -27,12 +27,16 @@ impl Display for LexicalAnalysisErr {
             LexicalAnalysisErr::UnsupportedKeywords(s) => {
                 write!(
                     f,
-                    "{:?} is not a supported word for this lexical_analysis.",
+                    "{} is not a supported word for this lexical_analysis.",
                     s
                 )
             }
-            LexicalAnalysisErr::UndefinedKeywords(s) => {
-                write!(f, "{:?} is not a defined keep word for this language.", s)
+            LexicalAnalysisErr::UndefinedKeywords(s, line_number) => {
+                write!(
+                    f,
+                    "{} is not a defined keep word for this language in line {}.",
+                    s, line_number
+                )
             }
         }
     }
